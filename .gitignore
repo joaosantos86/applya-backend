@@ -1,0 +1,129 @@
+# =============================================================================
+# Applya Backend — .gitignore
+# Objetivo: manter credenciais, artefatos locais e arquivos gerados fora do
+# versionamento, garantindo que o código-fonte e as migrations continuem
+# versionados.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Credenciais e arquivos sensíveis
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# Chaves e certificados privados
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.kdbx
+
+# Arquivos e diretórios com credenciais locais
+secrets/
+secrets*.json
+credentials*.json
+service-account*.json
+*.secret
+
+# Configurações locais sensíveis
+*.local.*
+
+# -----------------------------------------------------------------------------
+# Go — binários, testes e profiling
+# -----------------------------------------------------------------------------
+# Executáveis locais e binários compilados
+/applya-api
+/applya-backend
+/bin/
+/dist/
+*.exe
+*.exe~
+*.test
+
+# Build/temporários
+*.out
+*.a
+*.o
+*.obj
+
+# Cobertura de testes
+coverage.*
+*.cover
+*.coverprofile
+
+# Perfis de CPU, memória e trace
+*.prof
+*.pprof
+cpu.out
+mem.out
+trace.out
+
+# -----------------------------------------------------------------------------
+# IDEs e editores
+# -----------------------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# VS Code: ignora configurações pessoais, mas versiona as compartilhadas
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Editores diversos
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# -----------------------------------------------------------------------------
+# Sistema operacional
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# Logs, cache e arquivos temporários
+# -----------------------------------------------------------------------------
+*.log
+logs/
+tmp/
+.tmp/
+.cache/
+.debug/
+*.bak
+*.orig
+*.rej
+
+# -----------------------------------------------------------------------------
+# Banco de dados — dumps, backups e dados locais
+# (migrations *.sql continuam versionadas: não ignore a extensão .sql)
+# -----------------------------------------------------------------------------
+*.dump
+*.pgdump
+*.sql.gz
+*.sql.bz2
+*.sql.zip
+/dumps/
+/backups/
+/pgdata/
+
+# -----------------------------------------------------------------------------
+# Ferramentas locais
+# -----------------------------------------------------------------------------
+.gitleaks-report.json
+*.sarif
+AGENTS.md
