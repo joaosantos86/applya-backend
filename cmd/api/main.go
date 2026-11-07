@@ -22,6 +22,7 @@ import (
 	"github.com/joaosantos86/applya-backend/internal/http/handlers"
 	"github.com/joaosantos86/applya-backend/internal/http/router"
 	"github.com/joaosantos86/applya-backend/internal/http/server"
+	"github.com/joaosantos86/applya-backend/internal/resume"
 )
 
 func main() {
@@ -82,6 +83,9 @@ func run() error {
 	authHandler := handlers.NewAuthHandler(service, cookieCfg, cfg.SessionDuration, logger)
 	csrfMiddleware := auth.NewCSRFMiddleware(cfg.CORSAllowedOrigins, cookieCfg)
 
+	resumeService := resume.NewService(resume.NewStore(pool))
+	resumeHandler := handlers.NewResumeHandler(resumeService, logger)
+
 	handler := router.New(router.Options{
 		Logger:            logger,
 		AllowedOrigins:    cfg.CORSAllowedOrigins,
@@ -90,6 +94,9 @@ func run() error {
 			Handler:     authHandler,
 			RequireAuth: auth.RequireAuth(sessionManager, cookieCfg, logger),
 			CSRF:        csrfMiddleware.Handler,
+		},
+		Resumes: router.ResumeOptions{
+			Handler: resumeHandler,
 		},
 	})
 

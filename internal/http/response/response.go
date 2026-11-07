@@ -38,6 +38,10 @@ const (
 	CodeCSRFFailed     = "csrf_failed"
 	CodeRateLimited    = "rate_limited"
 	CodeValidationFail = "validation_failed"
+
+	// Currículos
+	CodeConflict        = "conflict"
+	CodePayloadTooLarge = "payload_too_large"
 )
 
 // ErrorPayload descreve um erro no corpo da resposta.
