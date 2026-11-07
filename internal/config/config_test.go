@@ -2,8 +2,10 @@ package config
 
 import (
 	"log/slog"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(values map[string]string) func(string) string {
@@ -19,6 +21,12 @@ func validEnv() map[string]string {
 		"DATABASE_URL":         "postgres://applya:applya@localhost:5432/applya?sslmode=disable",
 		"LOG_LEVEL":            "debug",
 		"CORS_ALLOWED_ORIGINS": "http://localhost:5173, https://applya.example.com",
+		"FRONTEND_URL":         "https://applya.example.com",
+		"SESSION_DURATION":     "48h",
+		"EMAIL_PROVIDER":       "resend",
+		"EMAIL_API_KEY":        "re_chave_demonstrativa",
+		"EMAIL_FROM":           "Applya <no-reply@applya.example.com>",
+		"COOKIE_SAMESITE":      "none",
 	}
 }
 
@@ -45,6 +53,24 @@ func TestLoadFromValid(t *testing.T) {
 	if cfg.CORSAllowedOrigins[1] != "https://applya.example.com" {
 		t.Errorf("origem[1] = %q, esperado %q", cfg.CORSAllowedOrigins[1], "https://applya.example.com")
 	}
+	if cfg.FrontendURL != "https://applya.example.com" {
+		t.Errorf("FrontendURL = %q", cfg.FrontendURL)
+	}
+	if cfg.SessionDuration != 48*time.Hour {
+		t.Errorf("SessionDuration = %v, esperado 48h", cfg.SessionDuration)
+	}
+	if cfg.EmailProvider != EmailProviderResend {
+		t.Errorf("EmailProvider = %q, esperado %q", cfg.EmailProvider, EmailProviderResend)
+	}
+	if cfg.EmailAPIKey != "re_chave_demonstrativa" {
+		t.Errorf("EmailAPIKey = %q", cfg.EmailAPIKey)
+	}
+	if cfg.EmailFrom != "Applya <no-reply@applya.example.com>" {
+		t.Errorf("EmailFrom = %q", cfg.EmailFrom)
+	}
+	if cfg.CookieSameSite != http.SameSiteNoneMode {
+		t.Errorf("CookieSameSite = %v, esperado SameSite=None", cfg.CookieSameSite)
+	}
 }
 
 func TestLoadFromDefaults(t *testing.T) {
@@ -53,6 +79,7 @@ func TestLoadFromDefaults(t *testing.T) {
 	cfg, err := LoadFrom(env(map[string]string{
 		"DATABASE_URL":         "postgresql://user:pass@localhost:5432/applya",
 		"CORS_ALLOWED_ORIGINS": "http://localhost:5173",
+		"FRONTEND_URL":         "http://localhost:5173",
 	}))
 	if err != nil {
 		t.Fatalf("LoadFrom() erro inesperado: %v", err)
@@ -66,6 +93,34 @@ func TestLoadFromDefaults(t *testing.T) {
 	}
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel padrão = %v, esperado %v", cfg.LogLevel, slog.LevelInfo)
+	}
+	if cfg.SessionDuration != defaultSessionDur {
+		t.Errorf("SessionDuration padrão = %v, esperado %v", cfg.SessionDuration, defaultSessionDur)
+	}
+	if cfg.EmailProvider != EmailProviderLog {
+		t.Errorf("EmailProvider padrão = %q, esperado %q", cfg.EmailProvider, EmailProviderLog)
+	}
+	if cfg.CookieSameSite != http.SameSiteLaxMode {
+		t.Errorf("CookieSameSite padrão = %v, esperado lax", cfg.CookieSameSite)
+	}
+}
+
+func TestLoadFromSMTP(t *testing.T) {
+	t.Parallel()
+
+	values := validEnv()
+	values["EMAIL_PROVIDER"] = "smtp"
+	values["SMTP_HOST"] = "smtp.gmail.com"
+	values["SMTP_PORT"] = "587"
+	values["SMTP_USERNAME"] = "applya@example.com"
+	values["SMTP_PASSWORD"] = "senha-de-app"
+
+	cfg, err := LoadFrom(env(values))
+	if err != nil {
+		t.Fatalf("LoadFrom() erro inesperado: %v", err)
+	}
+	if cfg.EmailProvider != EmailProviderSMTP || cfg.SMTPHost != "smtp.gmail.com" || cfg.SMTPPort != 587 {
+		t.Errorf("configuração SMTP inesperada: provider=%q host=%q port=%d", cfg.EmailProvider, cfg.SMTPHost, cfg.SMTPPort)
 	}
 }
 
@@ -136,6 +191,68 @@ func TestLoadFromInvalid(t *testing.T) {
 			name:      "CORS sem esquema",
 			override:  map[string]string{"CORS_ALLOWED_ORIGINS": "localhost:5173"},
 			wantInMsg: []string{"use http:// ou https://"},
+		},
+		{
+			name:      "FRONTEND_URL obrigatória",
+			override:  map[string]string{"FRONTEND_URL": ""},
+			wantInMsg: []string{"FRONTEND_URL é obrigatória"},
+		},
+		{
+			name:      "FRONTEND_URL com esquema inválido",
+			override:  map[string]string{"FRONTEND_URL": "ftp://applya.example.com"},
+			wantInMsg: []string{"FRONTEND_URL deve usar http:// ou https://"},
+		},
+		{
+			name:      "FRONTEND_URL com query",
+			override:  map[string]string{"FRONTEND_URL": "https://applya.example.com?x=1"},
+			wantInMsg: []string{"FRONTEND_URL não deve conter query"},
+		},
+		{
+			name:      "SESSION_DURATION inválida",
+			override:  map[string]string{"SESSION_DURATION": "amanhã"},
+			wantInMsg: []string{"SESSION_DURATION deve ser uma duração válida"},
+		},
+		{
+			name:      "SESSION_DURATION zero",
+			override:  map[string]string{"SESSION_DURATION": "0h"},
+			wantInMsg: []string{"SESSION_DURATION deve ser maior que zero"},
+		},
+		{
+			name:      "EMAIL_PROVIDER desconhecido",
+			override:  map[string]string{"EMAIL_PROVIDER": "gmail"},
+			wantInMsg: []string{"EMAIL_PROVIDER deve ser"},
+		},
+		{
+			name:      "EMAIL_API_KEY obrigatória no resend",
+			override:  map[string]string{"EMAIL_API_KEY": ""},
+			wantInMsg: []string{"EMAIL_API_KEY é obrigatória"},
+		},
+		{
+			name:      "EMAIL_FROM obrigatório no resend",
+			override:  map[string]string{"EMAIL_FROM": ""},
+			wantInMsg: []string{"EMAIL_FROM é obrigatório"},
+		},
+		{
+			name: "SMTP exige configuração completa",
+			override: map[string]string{
+				"EMAIL_PROVIDER": "smtp", "SMTP_HOST": "", "SMTP_PORT": "", "SMTP_USERNAME": "", "SMTP_PASSWORD": "", "EMAIL_FROM": "",
+			},
+			wantInMsg: []string{"SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD", "EMAIL_FROM"},
+		},
+		{
+			name:      "COOKIE_SAMESITE desconhecido",
+			override:  map[string]string{"COOKIE_SAMESITE": "everything"},
+			wantInMsg: []string{"COOKIE_SAMESITE deve ser lax, strict ou none"},
+		},
+		{
+			name:      "EMAIL_PROVIDER log proibido em produção",
+			override:  map[string]string{"APP_ENV": "production", "EMAIL_PROVIDER": "log"},
+			wantInMsg: []string{"EMAIL_PROVIDER=log não é permitido em produção"},
+		},
+		{
+			name:      "TRUST_PROXY_HEADERS inválido",
+			override:  map[string]string{"TRUST_PROXY_HEADERS": "talvez"},
+			wantInMsg: []string{"TRUST_PROXY_HEADERS deve ser true ou false"},
 		},
 	}
 
@@ -214,5 +331,33 @@ func TestLoadFromDoesNotLeakCredentials(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "super-secret") {
 		t.Errorf("mensagem de erro não deve conter a senha do banco: %v", err)
+	}
+}
+
+func TestLoadFromTrustProxyHeaders(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		raw  string
+		want bool
+	}{
+		{"", false}, // padrão: não confiar (evita spoofing de IP)
+		{"false", false},
+		{"true", true},
+		{"TRUE", true},
+	}
+
+	for _, tt := range tests {
+		values := validEnv()
+		values["TRUST_PROXY_HEADERS"] = tt.raw
+
+		cfg, err := LoadFrom(env(values))
+		if err != nil {
+			t.Errorf("LoadFrom() com TRUST_PROXY_HEADERS=%q erro inesperado: %v", tt.raw, err)
+			continue
+		}
+		if cfg.TrustProxyHeaders != tt.want {
+			t.Errorf("TrustProxyHeaders = %v, esperado %v (raw %q)", cfg.TrustProxyHeaders, tt.want, tt.raw)
+		}
 	}
 }
