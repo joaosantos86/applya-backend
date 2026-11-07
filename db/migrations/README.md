@@ -46,10 +46,12 @@ No PowerShell, use `$env:DATABASE_URL` em vez de `$DATABASE_URL`.
 
 ## Estado atual
 
-Migration aplicada:
+Migrations aplicadas:
 
 - `20261106000000_create_auth_tables.sql` — tabelas do módulo de autenticação:
   `users`, `sessions`, `auth_tokens` e `rate_limits`.
+- `20261107000000_create_resumes.sql` — tabela `resumes`, com currículo-base
+  único por usuário (índice parcial), versões relacionadas ao base e
+  constraints de integridade.
 
-As próximas migrations serão adicionadas junto com os módulos de perfis e
-currículos.
+As próximas migrations serão adicionadas junto com os próximos módulos.
