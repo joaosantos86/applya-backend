@@ -22,6 +22,22 @@ const (
 	CodeInternal         = "internal_error"
 	CodeNotFound         = "not_found"
 	CodeMethodNotAllowed = "method_not_allowed"
+
+	// Autenticação
+	CodeAuthenticationRequired = "authentication_required"
+	CodeInvalidCredentials     = "invalid_credentials"
+	CodeEmailNotVerified       = "email_not_verified"
+	CodeEmailAlreadyRegistered = "email_already_registered"
+
+	// Tokens de uso único
+	CodeInvalidToken = "invalid_token"
+	CodeExpiredToken = "expired_token"
+	CodeTokenUsed    = "token_used"
+
+	// Segurança
+	CodeCSRFFailed     = "csrf_failed"
+	CodeRateLimited    = "rate_limited"
+	CodeValidationFail = "validation_failed"
 )
 
 // ErrorPayload descreve um erro no corpo da resposta.

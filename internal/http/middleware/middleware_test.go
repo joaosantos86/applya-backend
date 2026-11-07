@@ -89,3 +89,86 @@ func TestCORSAllowedOrigin(t *testing.T) {
 		t.Errorf("Access-Control-Allow-Origin = %q, esperado %q", got, "http://localhost:5173")
 	}
 }
+
+func TestRealIPTrustsForwardedHeadersOnlyWhenConfigured(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name           string
+		trustProxy     bool
+		forwardedFor   string
+		wantRemoteAddr string
+	}{
+		{
+			name:           "sem proxy: X-Forwarded-For ignorado",
+			trustProxy:     false,
+			forwardedFor:   "6.6.6.6, 10.0.0.1",
+			wantRemoteAddr: "1.2.3.4:1234",
+		},
+		{
+			name:           "atrás de proxy: usa o primeiro IP de X-Forwarded-For",
+			trustProxy:     true,
+			forwardedFor:   "6.6.6.6, 10.0.0.1",
+			wantRemoteAddr: "6.6.6.6",
+		},
+		{
+			name:           "atrás de proxy: X-Forwarded-For malformado é ignorado",
+			trustProxy:     true,
+			forwardedFor:   "nao-e-um-ip",
+			wantRemoteAddr: "1.2.3.4:1234",
+		},
+		{
+			name:           "atrás de proxy: sem header preserva o socket",
+			trustProxy:     true,
+			forwardedFor:   "",
+			wantRemoteAddr: "1.2.3.4:1234",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			var gotRemoteAddr string
+			handler := RealIP(tt.trustProxy)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				gotRemoteAddr = r.RemoteAddr
+			}))
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+			req.RemoteAddr = "1.2.3.4:1234"
+			if tt.forwardedFor != "" {
+				req.Header.Set("X-Forwarded-For", tt.forwardedFor)
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if gotRemoteAddr != tt.wantRemoteAddr {
+				t.Errorf("RemoteAddr = %q, esperado %q", gotRemoteAddr, tt.wantRemoteAddr)
+			}
+		})
+	}
+}
+
+func TestSecurityHeaders(t *testing.T) {
+	t.Parallel()
+
+	handler := SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/auth/me", nil))
+
+	want := map[string]string{
+		"Cache-Control":          "no-store",
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "no-referrer",
+	}
+	for header, value := range want {
+		if got := rec.Header().Get(header); got != value {
+			t.Errorf("%s = %q, esperado %q", header, got, value)
+		}
+	}
+}

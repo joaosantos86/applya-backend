@@ -1,8 +1,9 @@
 // Comando api é o ponto de entrada do backend do Applya.
 //
 // Responsabilidades: carregar configuração, montar logger, abrir o pool do
-// PostgreSQL, montar o roteador e executar o servidor HTTP até o encerramento
-// gracioso. Lógica de negócio não pertence a este pacote.
+// PostgreSQL, construir os módulos (autenticação, e-mail), montar o roteador e
+// executar o servidor HTTP até o encerramento gracioso. Lógica de negócio não
+// pertence a este pacote.
 package main
 
 import (
@@ -12,9 +13,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
+	"github.com/joaosantos86/applya-backend/internal/auth"
 	"github.com/joaosantos86/applya-backend/internal/config"
 	"github.com/joaosantos86/applya-backend/internal/database"
+	"github.com/joaosantos86/applya-backend/internal/email"
+	"github.com/joaosantos86/applya-backend/internal/http/handlers"
 	"github.com/joaosantos86/applya-backend/internal/http/router"
 	"github.com/joaosantos86/applya-backend/internal/http/server"
 )
@@ -40,6 +45,7 @@ func run() error {
 		slog.String("env", cfg.AppEnv),
 		slog.Int("http_port", cfg.HTTPPort),
 		slog.String("log_level", cfg.LogLevel.String()),
+		slog.String("email_provider", cfg.EmailProvider),
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -51,9 +57,40 @@ func run() error {
 	}
 	defer pool.Close()
 
+	sender, err := newEmailSender(cfg, logger)
+	if err != nil {
+		return err
+	}
+	mailer := email.NewMailer(sender, cfg.EmailFrom, cfg.FrontendURL)
+
+	store := auth.NewStore(pool)
+	sessionManager := auth.NewSessionManager(store, cfg.SessionDuration, time.Now)
+
+	service := auth.NewService(auth.ServiceOptions{
+		Store:    store,
+		Sessions: sessionManager,
+		Mailer:   mailer,
+		Hasher:   auth.DefaultPasswordHasher(),
+		Logger:   logger,
+	})
+
+	cookieCfg := auth.CookieConfig{
+		Secure:   cfg.IsProduction(),
+		SameSite: cfg.CookieSameSite,
+	}
+
+	authHandler := handlers.NewAuthHandler(service, cookieCfg, cfg.SessionDuration, logger)
+	csrfMiddleware := auth.NewCSRFMiddleware(cfg.CORSAllowedOrigins, cookieCfg)
+
 	handler := router.New(router.Options{
-		Logger:         logger,
-		AllowedOrigins: cfg.CORSAllowedOrigins,
+		Logger:            logger,
+		AllowedOrigins:    cfg.CORSAllowedOrigins,
+		TrustProxyHeaders: cfg.TrustProxyHeaders,
+		Auth: router.AuthOptions{
+			Handler:     authHandler,
+			RequireAuth: auth.RequireAuth(sessionManager, cookieCfg, logger),
+			CSRF:        csrfMiddleware.Handler,
+		},
 	})
 
 	srv := server.New(server.Options{
@@ -63,6 +100,20 @@ func run() error {
 	})
 
 	return server.Run(ctx, srv, logger)
+}
+
+// newEmailSender cria o Sender conforme EMAIL_PROVIDER.
+func newEmailSender(cfg config.Config, logger *slog.Logger) (email.Sender, error) {
+	switch cfg.EmailProvider {
+	case config.EmailProviderResend:
+		return email.NewResendSender(cfg.EmailAPIKey, nil), nil
+	case config.EmailProviderSMTP:
+		return email.NewSMTPSender(cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUsername, cfg.SMTPPassword), nil
+	case config.EmailProviderLog:
+		return email.NewLogSender(logger), nil
+	default:
+		return nil, fmt.Errorf("provedor de e-mail desconhecido: %q", cfg.EmailProvider)
+	}
 }
 
 // newLogger cria o logger estruturado (log/slog) usado pela aplicação.

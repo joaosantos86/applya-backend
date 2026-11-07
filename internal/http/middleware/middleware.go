@@ -6,8 +6,10 @@ package middleware
 
 import (
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
@@ -125,9 +127,64 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	return cors.Handler(cors.Options{
 		AllowedOrigins:   allowedOrigins,
 		AllowedMethods:   []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodOptions},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Request-Id"},
 		ExposedHeaders:   []string{"X-Request-Id"},
 		AllowCredentials: true,
 		MaxAge:           corsMaxAge,
+	})
+}
+
+// RealIP identifica o IP do cliente para rate limiting e logs.
+//
+// Substitui o middleware.RealIP do chi (deprecated e vulnerável a spoofing —
+// GHSA-3fxj-6jh8-hvhx): ele confiava em X-Forwarded-For/X-Real-IP mesmo quando
+// a API não está atrás de um proxy, permitindo a um atacante rotacionar o IP
+// visto pela aplicação e burlar limites por IP.
+//
+// Aqui os headers de encaminhamento só são considerados quando
+// trustProxyHeaders é true — configuração explícita para rodar atrás de um
+// proxy confiável (Render), que sobrescreve X-Forwarded-For. Quando false
+// (padrão, acesso direto), o socket RemoteAddr é preservado.
+func RealIP(trustProxyHeaders bool) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if trustProxyHeaders {
+				if ip := forwardedIP(r.Header.Get("X-Forwarded-For")); ip != "" {
+					r.RemoteAddr = ip
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// forwardedIP devolve o primeiro IP válido de X-Forwarded-For (o IP do
+// cliente, que um proxy confiável coloca na ponta esquerda da lista).
+func forwardedIP(header string) string {
+	first, _, _ := strings.Cut(header, ",")
+	ip := strings.TrimSpace(first)
+	if net.ParseIP(ip) == nil {
+		return ""
+	}
+	return ip
+}
+
+// SecurityHeaders aplica cabeçalhos de hardening em todas as respostas da API.
+//
+//   - Cache-Control: no-store — respostas de autenticação e dados do usuário não
+//     devem ser cacheadas pelo navegador nem por proxies;
+//   - X-Content-Type-Options: nosniff — evita MIME sniffing;
+//   - X-Frame-Options: DENY — evita enquadramento da API (clickjacking);
+//   - Referrer-Policy: no-referrer — evita vazar URLs (como links de
+//     redefinição com token) pelo header Referer.
+func SecurityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Cache-Control", "no-store")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Referrer-Policy", "no-referrer")
+
+		next.ServeHTTP(w, r)
 	})
 }

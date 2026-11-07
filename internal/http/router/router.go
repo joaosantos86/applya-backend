@@ -20,6 +20,21 @@ import (
 type Options struct {
 	Logger         *slog.Logger
 	AllowedOrigins []string
+
+	// TrustProxyHeaders indica que a API está atrás de um proxy confiável
+	// (Render) e pode usar X-Forwarded-For para identificar o cliente.
+	TrustProxyHeaders bool
+
+	// Auth reúne as rotas e middlewares de autenticação. Quando Handler é
+	// nil, as rotas /api/v1/auth não são registradas.
+	Auth AuthOptions
+}
+
+// AuthOptions descreve o que o roteador precisa do módulo de autenticação.
+type AuthOptions struct {
+	Handler     *handlers.AuthHandler
+	RequireAuth func(http.Handler) http.Handler
+	CSRF        func(http.Handler) http.Handler
 }
 
 // New cria o roteador com todas as rotas e middlewares da API.
@@ -29,9 +44,10 @@ func New(opts Options) http.Handler {
 	// A ordem importa: o request ID precisa existir antes do logger e do
 	// recoverer, e o CORS deve responder ao preflight antes das rotas.
 	r.Use(middleware.RequestID)
-	r.Use(chimiddleware.RealIP)
+	r.Use(middleware.RealIP(opts.TrustProxyHeaders))
 	r.Use(middleware.Logger(opts.Logger))
 	r.Use(middleware.Recoverer(opts.Logger))
+	r.Use(middleware.SecurityHeaders)
 	r.Use(middleware.CORS(opts.AllowedOrigins))
 
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
@@ -45,5 +61,35 @@ func New(opts Options) http.Handler {
 
 	r.Get("/health", handlers.Health)
 
+	if opts.Auth.Handler != nil {
+		registerAuthRoutes(r, opts.Auth)
+	}
+
 	return r
+}
+
+// registerAuthRoutes monta as rotas do módulo de autenticação.
+func registerAuthRoutes(r chi.Router, authOpts AuthOptions) {
+	r.Route("/api/v1/auth", func(r chi.Router) {
+		if authOpts.CSRF != nil {
+			r.Use(authOpts.CSRF)
+		}
+
+		h := authOpts.Handler
+		r.Get("/csrf", h.CSRF)
+		r.Post("/register", h.Register)
+		r.Post("/verify-email", h.VerifyEmail)
+		r.Post("/resend-verification", h.ResendVerification)
+		r.Post("/login", h.Login)
+		r.Post("/logout", h.Logout)
+		r.Post("/forgot-password", h.ForgotPassword)
+		r.Post("/reset-password", h.ResetPassword)
+
+		if authOpts.RequireAuth != nil {
+			r.Group(func(r chi.Router) {
+				r.Use(authOpts.RequireAuth)
+				r.Get("/me", h.Me)
+			})
+		}
+	})
 }
