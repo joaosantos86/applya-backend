@@ -28,6 +28,16 @@ type Options struct {
 	// Auth reúne as rotas e middlewares de autenticação. Quando Handler é
 	// nil, as rotas /api/v1/auth não são registradas.
 	Auth AuthOptions
+
+	// Resumes reúne o handler de currículos. As rotas só são registradas
+	// quando o handler e os middlewares de autenticação/CSRF estão presentes:
+	// nenhuma rota de currículo existe sem proteção de sessão.
+	Resumes ResumeOptions
+}
+
+// ResumeOptions descreve o que o roteador precisa do módulo de currículos.
+type ResumeOptions struct {
+	Handler *handlers.ResumeHandler
 }
 
 // AuthOptions descreve o que o roteador precisa do módulo de autenticação.
@@ -65,6 +75,10 @@ func New(opts Options) http.Handler {
 		registerAuthRoutes(r, opts.Auth)
 	}
 
+	if opts.Resumes.Handler != nil && opts.Auth.RequireAuth != nil && opts.Auth.CSRF != nil {
+		registerResumeRoutes(r, opts)
+	}
+
 	return r
 }
 
@@ -91,5 +105,32 @@ func registerAuthRoutes(r chi.Router, authOpts AuthOptions) {
 				r.Get("/me", h.Me)
 			})
 		}
+	})
+}
+
+// registerResumeRoutes monta as rotas de currículos. Todas exigem sessão
+// autenticada; os métodos de escrita também passam pelo middleware CSRF.
+func registerResumeRoutes(r chi.Router, opts Options) {
+	h := opts.Resumes.Handler
+	guard := func(r chi.Router) {
+		r.Use(opts.Auth.RequireAuth)
+		r.Use(opts.Auth.CSRF)
+
+		r.Get("/base", h.GetBase)
+		r.Patch("/base", h.UpdateBase)
+
+		r.Get("/versions", h.ListVersions)
+		r.Post("/versions", h.CreateVersion)
+		r.Get("/versions/{id}", h.GetVersion)
+		r.Patch("/versions/{id}", h.UpdateVersion)
+		r.Delete("/versions/{id}", h.DeleteVersion)
+	}
+
+	r.Route("/api/v1/resumes", guard)
+
+	r.Group(func(r chi.Router) {
+		r.Use(opts.Auth.RequireAuth)
+		r.Use(opts.Auth.CSRF)
+		r.Get("/api/v1/workspace", h.Workspace)
 	})
 }
