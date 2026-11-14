@@ -1,61 +1,42 @@
-# Applya API
+# Applya backend
 
-Backend do Applya, um projeto pessoal para criar, personalizar e organizar
-currículos adaptados a vagas. O frontend é uma aplicação Vue separada. Este
-repositório fornece a API REST, a autenticação e o workspace de currículos.
+Applya is a personal project for building resumes tailored to job applications.
+This repository contains the Go REST API; the frontend lives in
+`applya-frontend`.
+
+The API currently covers registration, email verification, sign-in, password
+recovery, session management, and a persistent resume workspace. The workspace
+has one base resume per user, independent resume versions, optimistic
+concurrency, and A4 PDF export. Profiles, templates, public sharing, AI, and
+payments are not implemented.
 
 ## Stack
 
-- Go 1.27
-- `net/http` e Chi
-- PostgreSQL com pgx
-- Migrations com Goose
-- Hash de senha com Argon2id
-- Sessões com cookies HTTP-only
+Go 1.27, `net/http`, Chi, PostgreSQL with pgx, Goose migrations, Argon2id,
+HTTP-only session cookies, structured `log/slog` logging, and
+`go-pdf/fpdf` with embedded fonts.
 
-## Funcionalidades
+## Run locally
 
-- health check;
-- cadastro e confirmação de e-mail;
-- login, logout e consulta do usuário atual;
-- recuperação e redefinição de senha;
-- sessões e rate limiting persistidos no PostgreSQL;
-- proteção CSRF, CORS e logging estruturado;
-- envio de e-mail por SMTP, Resend ou log local;
-- currículo-base único por usuário, criado automaticamente;
-- versões independentes criadas a partir do currículo-base;
-- edição de dados pessoais, resumo, experiências, formação, habilidades,
-  projetos e idiomas;
-- endpoint de workspace para o carregamento inicial da interface.
-
-## Requisitos
-
-- Go 1.27 ou mais recente;
-- PostgreSQL 16 ou mais recente;
-- [Goose](https://github.com/pressly/goose) para migrations.
+Use Go 1.27+ and PostgreSQL 16+. Install Goose if it is not already available:
 
 ```bash
 go install github.com/pressly/goose/v3/cmd/goose@latest
 ```
 
-No Windows, adicione `%USERPROFILE%\go\bin` ao `PATH` para chamar `goose`
-diretamente.
-
-## Setup local
-
-Copie o template de ambiente:
+Copy the environment template and adjust `DATABASE_URL` if needed:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-Ajuste `DATABASE_URL` se necessário. O valor local padrão é:
+The default local database URL is:
 
 ```text
 postgres://applya:applya@localhost:5432/applya?sslmode=disable
 ```
 
-Carregue o ambiente e aplique as migrations:
+Load the environment and apply migrations:
 
 ```powershell
 Get-Content .env | Where-Object { $_ -match "^\s*[^#].*=" } | ForEach-Object {
@@ -66,210 +47,169 @@ Get-Content .env | Where-Object { $_ -match "^\s*[^#].*=" } | ForEach-Object {
 goose -dir db/migrations postgres $env:DATABASE_URL up
 ```
 
-Inicie a API:
+Start the API:
 
 ```powershell
 .\scripts\run.ps1
 ```
 
-O endereço padrão é `http://localhost:8080`.
+The API listens at `http://localhost:8080` by default. To check that it is
+running:
 
-## Ambiente
+```bash
+curl http://localhost:8080/health
+```
 
-O serviço lê as variáveis na inicialização. `scripts/run.ps1` carrega `.env`
-localmente; plataformas de hospedagem devem fornecer os mesmos valores pela
-interface de variáveis de ambiente.
+The expected response is `{"status":"ok"}`.
 
-| Variável | Obrigatória | Descrição |
+## Environment
+
+The API reads configuration once during startup. `.env` is loaded by
+`scripts/run.ps1`; hosted environments must provide these values through their
+environment configuration.
+
+| Variable | Required | Purpose |
 | --- | --- | --- |
-| `APP_ENV` | Não | `development`, `test` ou `production` |
-| `HTTP_PORT` | Não | Porta HTTP; padrão `8080` |
-| `DATABASE_URL` | Sim | String de conexão do PostgreSQL |
-| `LOG_LEVEL` | Não | `debug`, `info`, `warn` ou `error` |
-| `CORS_ALLOWED_ORIGINS` | Sim | Origens do frontend, explícitas e separadas por vírgula |
-| `FRONTEND_URL` | Sim | URL base usada nos links de e-mail |
-| `SESSION_DURATION` | Não | Duração da sessão; padrão `720h` |
-| `EMAIL_PROVIDER` | Não | `log`, `resend` ou `smtp` |
-| `EMAIL_FROM` | SMTP/Resend | Endereço remetente |
-| `EMAIL_API_KEY` | Resend | Chave da API do Resend |
-| `SMTP_HOST` | SMTP | Host SMTP |
-| `SMTP_PORT` | SMTP | Porta com STARTTLS, normalmente `587` |
-| `SMTP_USERNAME` | SMTP | Usuário SMTP |
-| `SMTP_PASSWORD` | SMTP | Senha de app ou credencial do provedor |
-| `COOKIE_SAMESITE` | Não | `lax`, `strict` ou `none` |
-| `TRUST_PROXY_HEADERS` | Não | Habilite apenas atrás de proxy confiável |
+| `APP_ENV` | No | `development`, `test`, or `production` |
+| `HTTP_PORT` | No | HTTP port; defaults to `8080` |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `LOG_LEVEL` | No | `debug`, `info`, `warn`, or `error` |
+| `CORS_ALLOWED_ORIGINS` | Yes | Explicit, comma-separated frontend origins |
+| `FRONTEND_URL` | Yes | Base URL used in email links |
+| `SESSION_DURATION` | No | Session lifetime; defaults to `720h` |
+| `EMAIL_PROVIDER` | No | `log`, `resend`, or `smtp` |
+| `EMAIL_FROM` | Resend/SMTP | Transactional email sender |
+| `EMAIL_API_KEY` | Resend | Resend API key |
+| `SMTP_HOST` | SMTP | SMTP host |
+| `SMTP_PORT` | SMTP | STARTTLS port, usually `587` |
+| `SMTP_USERNAME` | SMTP | SMTP username |
+| `SMTP_PASSWORD` | SMTP | SMTP password or app password |
+| `COOKIE_SAMESITE` | No | `lax`, `strict`, or `none` |
+| `TRUST_PROXY_HEADERS` | No | Enable only behind a trusted proxy |
 
-Origens devem ser explícitas. `CORS_ALLOWED_ORIGINS=*` é rejeitado.
+Origins must be explicit. `CORS_ALLOWED_ORIGINS=*` is rejected.
 
-### E-mail
-
-`EMAIL_PROVIDER=log` é destinado ao desenvolvimento local. Ele escreve o e-mail
-completo e o link de confirmação no log da API em vez de enviar a mensagem.
-
-SMTP exige STARTTLS e TLS 1.2 ou mais recente. Exemplo com Gmail:
-
-```text
-EMAIL_PROVIDER=smtp
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=seu-endereco@gmail.com
-SMTP_PASSWORD=sua-senha-de-app-de-16-caracteres
-EMAIL_FROM=Applya <seu-endereco@gmail.com>
-```
-
-Use uma senha de app do Google, não a senha de login da conta.
-
-Para o Resend:
-
-```text
-EMAIL_PROVIDER=resend
-EMAIL_API_KEY=re_...
-EMAIL_FROM=Applya <no-reply@seu-dominio.com>
-```
+`EMAIL_PROVIDER=log` is intended for local development. It writes the complete
+email and link to the API log instead of sending it. It is rejected in
+production. Resend and SMTP require the corresponding credentials; SMTP uses
+STARTTLS and TLS 1.2 or newer.
 
 ## API
 
-```text
-GET /health
-```
+### Authentication
 
-```json
-{"status":"ok"}
-```
-
-### Autenticação
-
-| Método | Rota | Descrição |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/auth/register` | Cria uma conta não confirmada |
-| `POST` | `/api/v1/auth/verify-email` | Confirma o e-mail com token de uso único |
-| `POST` | `/api/v1/auth/resend-verification` | Reenvia o link de confirmação |
-| `POST` | `/api/v1/auth/login` | Cria uma sessão |
-| `POST` | `/api/v1/auth/logout` | Invalida a sessão |
-| `GET` | `/api/v1/auth/me` | Retorna o usuário autenticado |
-| `GET` | `/api/v1/auth/csrf` | Retorna e define um token CSRF |
-| `POST` | `/api/v1/auth/forgot-password` | Solicita um link de recuperação |
-| `POST` | `/api/v1/auth/reset-password` | Redefine a senha com token de uso único |
+| `POST` | `/api/v1/auth/register` | Create an unverified account |
+| `POST` | `/api/v1/auth/verify-email` | Verify an email with a one-time token |
+| `POST` | `/api/v1/auth/resend-verification` | Send another verification link |
+| `POST` | `/api/v1/auth/login` | Create a session |
+| `POST` | `/api/v1/auth/logout` | Invalidate the current session |
+| `GET` | `/api/v1/auth/me` | Return the authenticated user |
+| `GET` | `/api/v1/auth/csrf` | Return and set a CSRF token |
+| `POST` | `/api/v1/auth/forgot-password` | Request a password reset link |
+| `POST` | `/api/v1/auth/reset-password` | Set a new password with a one-time token |
 
-`GET /api/v1/auth/me` responde `401 authentication_required` sem sessão válida —
-esse é o estado normal de usuário deslogado.
+`GET /api/v1/auth/me` returns `401 authentication_required` when no valid
+session exists. This is the normal signed-out state.
 
-### Currículos
+### Resumes
 
-Todas as rotas exigem sessão autenticada. O proprietário é sempre o usuário da
-sessão; a API nunca aceita `user_id` do cliente.
+All resume routes require an authenticated session. Ownership comes from the
+session; the API never accepts `user_id` from the client.
 
-| Método | Rota | Descrição |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/v1/resumes/base` | Obtém (criando se necessário) o currículo-base |
-| `PATCH` | `/api/v1/resumes/base` | Atualiza o currículo-base |
-| `GET` | `/api/v1/resumes/versions` | Lista as versões do usuário |
-| `POST` | `/api/v1/resumes/versions` | Cria uma versão a partir do base |
-| `GET` | `/api/v1/resumes/versions/{id}` | Obtém uma versão completa |
-| `PATCH` | `/api/v1/resumes/versions/{id}` | Atualiza uma versão |
-| `DELETE` | `/api/v1/resumes/versions/{id}` | Exclui uma versão |
-| `GET` | `/api/v1/workspace` | Carrega usuário, base e versões de uma vez |
+| `GET` | `/api/v1/resumes/base` | Get or create the base resume |
+| `PATCH` | `/api/v1/resumes/base` | Update the base resume |
+| `GET` | `/api/v1/resumes/versions` | List the user's versions |
+| `POST` | `/api/v1/resumes/versions` | Create a version from the base |
+| `GET` | `/api/v1/resumes/versions/{id}` | Get a complete version |
+| `PATCH` | `/api/v1/resumes/versions/{id}` | Update a version |
+| `DELETE` | `/api/v1/resumes/versions/{id}` | Delete a version |
+| `POST` | `/api/v1/resumes/export/pdf` | Generate and return an A4 PDF |
+| `GET` | `/api/v1/workspace` | Load the user, base, and versions |
 
-Regras principais:
+PATCH requests are partial by section: omitted sections are preserved, sent
+sections replace the entire section, and `[]` clears a collection. A `revision`
+value provides optimistic concurrency and stale updates return `409 conflict`.
+Versions are independent copies: changing the base does not change existing
+versions, and changing a version does not change the base.
 
-- cada usuário tem exatamente um currículo-base lógico, criado na primeira
-  chamada e garantido por índice único no PostgreSQL;
-- uma versão nasce como cópia independente do currículo-base;
-- alterar a versão não altera o base e alterar o base não altera versões;
-- o currículo-base não pode ser excluído pelas rotas de versão;
-- `PATCH` é parcial por seção: seções omitidas são preservadas; seções enviadas
-  substituem a seção inteira; `[]` limpa uma coleção;
-- `revision` permite concorrência otimista e responde `409 conflict` quando
-  desatualizada.
+### PDF export
 
-Exemplo de criação de versão:
+`POST /api/v1/resumes/export/pdf` accepts the complete resume in the request
+body and returns the PDF directly. The document is not persisted. The accepted
+sections are `personal`, `summary`, `experiences`, `education`, `skills`,
+`projects`, and `languages`.
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/resumes/versions \
+curl -X POST http://localhost:8080/api/v1/resumes/export/pdf \
   -H "Content-Type: application/json" \
   -H "X-CSRF-Token: $CSRF_TOKEN" \
   --cookie "applya_session=$SESSION; applya_csrf=$CSRF_TOKEN" \
-  -d '{"name":"Backend Go"}'
+  --data-binary @resume.json \
+  --output resume.pdf
 ```
 
-### Cookies e CSRF
+The export validates field and collection limits, URLs, dates, and language
+proficiency. URLs must use HTTP or HTTPS; dates use `YYYY-MM`. Text is rendered
+as plain text, never as client-provided HTML or CSS. The API limits exports to
+10 per minute per user and returns `429 rate_limited` with `Retry-After` when
+the limit is exceeded. The full contract is in
+[`docs/openapi.yaml`](docs/openapi.yaml), with frontend integration notes in
+[`docs/frontend-integration-pdf.md`](docs/frontend-integration-pdf.md).
 
-A API usa o cookie HTTP-only `applya_session`. Toda requisição que muda estado
-precisa de proteção CSRF:
+## Sessions and CSRF
 
-1. chame `GET /api/v1/auth/csrf` com `credentials: 'include'`;
-2. mantenha o cookie `applya_csrf`;
-3. envie o valor no header `X-CSRF-Token` em `POST`, `PUT`, `PATCH` e `DELETE`.
+Sessions are stored in PostgreSQL and sent in the HTTP-only `applya_session`
+cookie. The frontend must use `credentials: 'include'` for API requests.
 
-A API também valida `Origin` ou `Referer` quando presentes. Requisições CSRF
-inválidas recebem `403 csrf_failed`. CSRF nunca é desabilitado para facilitar a
-integração.
+Every state-changing request (`POST`, `PUT`, `PATCH`, and `DELETE`) requires a
+double-submit CSRF token:
 
-```ts
-await fetch("http://localhost:8080/api/v1/resumes/versions", {
-  method: "POST",
-  credentials: "include",
-  headers: {
-    "Content-Type": "application/json",
-    "X-CSRF-Token": csrfToken,
-  },
-  body: JSON.stringify({ name: "Backend Go" }),
-})
-```
+1. Call `GET /api/v1/auth/csrf` with credentials included.
+2. Keep the `applya_csrf` cookie.
+3. Send its value in the `X-CSRF-Token` header.
 
-Frontend e API no mesmo site (subdomínios do mesmo domínio registrável) com
-`COOKIE_SAMESITE=lax` é a configuração recomendada, especialmente em
-dispositivos móveis. Em sites diferentes, `COOKIE_SAMESITE=none` exige cookies
-de terceiros, que navegadores móveis podem bloquear.
+The API also validates `Origin` or `Referer` when present. Invalid requests
+return `403 csrf_failed`. CORS allows credentials, the API methods,
+`Content-Type`, `X-CSRF-Token`, and preflight `OPTIONS` requests.
 
-### Formato de erro
+## Errors
+
+Errors use one JSON shape:
 
 ```json
 {
   "error": {
     "code": "validation_failed",
-    "message": "Verifique os campos enviados.",
+    "message": "Check the submitted fields.",
     "request_id": "..."
   }
 }
 ```
 
-Códigos comuns: `validation_failed`, `authentication_required`,
+Common codes include `validation_failed`, `authentication_required`,
 `invalid_credentials`, `email_not_verified`, `csrf_failed`, `rate_limited`,
-`not_found`, `conflict`, `payload_too_large` e `internal_error`.
-
-## CORS
-
-A configuração local do frontend é:
-
-```text
-CORS_ALLOWED_ORIGINS=http://localhost:5173
-```
-
-O middleware CORS permite credenciais, métodos da API, `Content-Type`,
-`X-CSRF-Token` e preflight `OPTIONS`. Ele roda antes da autenticação e do CSRF
-das rotas.
+`not_found`, `conflict`, `payload_too_large`, `invalid_resume`,
+`pdf_generation_failed`, and `internal_error`.
 
 ## Migrations
 
-As migrations ficam em `db/migrations` e nunca são executadas automaticamente
-pela API.
+Migrations live in `db/migrations` and are never run automatically by the API.
 
 ```bash
-goose -dir db/migrations create create_profiles sql
 goose -dir db/migrations postgres "$DATABASE_URL" up
 goose -dir db/migrations postgres "$DATABASE_URL" status
 goose -dir db/migrations postgres "$DATABASE_URL" down
 ```
 
-Migrations existentes:
+The current migrations create the authentication tables (`users`, `sessions`,
+`auth_tokens`, and `rate_limits`) and the resume table with the base/version
+constraints.
 
-- `20261106000000_create_auth_tables.sql` — `users`, `sessions`, `auth_tokens`
-  e `rate_limits`;
-- `20261107000000_create_resumes.sql` — `resumes`, com o índice único de
-  currículo-base por usuário e as constraints de relação base/versão.
-
-## Verificações
+## Commands and checks
 
 ```bash
 gofmt -l .
@@ -281,56 +221,57 @@ go build ./cmd/api
 gitleaks git --log-opts=--all
 ```
 
-Testes unitários não precisam de PostgreSQL. Testes de integração exigem um
-banco descartável e são executados separadamente por pacote (ambos os pacotes
-compartilham a tabela `users` em um banco de teste):
+Unit tests run without PostgreSQL. Integration tests require a disposable
+database and are marked with the `integration` build tag:
 
 ```bash
 go test -tags=integration ./internal/auth
 go test -tags=integration ./internal/resume
 ```
 
-## Deploy
+## Source layout
 
-A API pode rodar no Render com PostgreSQL (por exemplo, Neon). Mantenha o
-`.env` local e configure o deploy pelo painel da plataforma:
+```text
+cmd/api/                 Application bootstrap
+internal/auth/           Sessions, tokens, CSRF, and rate limiting
+internal/config/         Environment validation
+internal/database/       PostgreSQL pool lifecycle
+internal/email/          Email templates and providers
+internal/http/           Handlers, middleware, responses, and routes
+internal/metrics/         In-memory PDF export counters
+internal/resume/         Resume domain, validation, persistence, and PDF
+docs/                    Technical decisions and OpenAPI contract
+db/migrations/            Goose migrations
+```
+
+## Deployment
+
+The API can run on a Go host with managed PostgreSQL. Configure the production
+environment through the hosting provider rather than committing `.env`:
 
 ```text
 APP_ENV=production
 HTTP_PORT=10000
 DATABASE_URL=postgres://...?sslmode=require
-CORS_ALLOWED_ORIGINS=https://seu-frontend.vercel.app
-FRONTEND_URL=https://seu-frontend.vercel.app
+CORS_ALLOWED_ORIGINS=https://your-frontend.example.com
+FRONTEND_URL=https://your-frontend.example.com
+EMAIL_PROVIDER=resend
 COOKIE_SAMESITE=none
 TRUST_PROXY_HEADERS=true
 ```
 
-Para frontend e API em sites diferentes, `COOKIE_SAMESITE=none` é necessário.
-Cookies de produção recebem `Secure` automaticamente.
+For frontend and API on different sites, `COOKIE_SAMESITE=none` is required and
+production cookies receive `Secure` automatically. Validate browser flows,
+CORS, HTTPS, cookies, and response headers before publishing.
 
-## Estrutura do projeto
+## Security
 
-```text
-cmd/api/                 bootstrap da aplicação
-internal/auth/           sessões, tokens, CSRF e rate limiting
-internal/config/         validação das variáveis de ambiente
-internal/database/       ciclo de vida do pool PostgreSQL
-internal/email/          templates e envio por SMTP/Resend
-internal/http/           handlers, middlewares, respostas e rotas
-internal/resume/         currículos: domínio, validação e persistência
-db/migrations/           migrations Goose
-```
+Passwords use Argon2id. Session, confirmation, and recovery tokens are generated
+with `crypto/rand` and only their hashes are stored. Confirmation tokens expire
+after 24 hours and recovery tokens after 30 minutes. Resume queries are always
+filtered by the authenticated user. Never commit `.env`, database URLs, email
+credentials, provider keys, or dumps.
 
-## Segurança
+## License
 
-- Senhas usam Argon2id.
-- Tokens de sessão, confirmação e recuperação vêm de `crypto/rand` e são
-  armazenados como hash.
-- Tokens de confirmação expiram em 24 horas; os de recuperação, em 30 minutos.
-- Todas as consultas de currículos filtram pelo usuário da sessão.
-- Nunca faça commit de `.env`, URLs de banco, credenciais SMTP ou chaves de
-  provedor.
-
-## Licença
-
-Projeto pessoal de portfólio e aprendizado.
+Personal portfolio and learning project.
